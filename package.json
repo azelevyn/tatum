@@ -1,13 +1,18 @@
 {
-  "name": "tatum-telegram-bot",
+  "name": "telegram-mining-bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Telegram mining bot with CoinPayments USDT integration",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
+  "author": "Dean",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0",
-    "dotenv": "^16.0.0",
+    "body-parser": "^1.20.2",
+    "coinpayments": "^1.4.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "node-telegram-bot-api": "^0.61.0"
   }
 }
