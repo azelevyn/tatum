@@ -91,32 +91,30 @@ bot.on('callback_query', async (callbackQuery) => {
       bot.sendMessage(chatId, "Please enter your TRC20 wallet address for withdrawal.\nFormat: `/sendwallet YOUR_TRX_ADDRESS`");
       break;
   }
-});
 
-// --- Handle Plan Purchase ---
-bot.on('callback_query', async (callbackQuery) => {
-  const data = callbackQuery.data;
-  const msg = callbackQuery.message;
-  const chatId = msg.chat.id;
-  const userId = callbackQuery.from.id;
-
+  // --- Handle Plan Purchase (TRC20) ---
   if (data.startsWith("plan_")) {
     const planName = data.split("_")[1];
     const planData = plans[planName];
 
     try {
       const tx = await client.createTransaction({
-        currency1: 'USDT',
-        currency2: 'USDT',
+        currency1: 'USDT',                  // user pays
+        currency2: 'USDT',                  // you receive
         amount: planData.cost,
         buyer_email: `${callbackQuery.from.username || callbackQuery.from.first_name}@example.com`,
-        custom: JSON.stringify({ userId, plan: planName })
+        custom: JSON.stringify({ userId, plan: planName }),
+        ipn_url: 'https://YOUR_DOMAIN/ipn', // must be public
+        currency2_network: 'TRC.20'          // force TRC20
       });
 
-      bot.sendMessage(chatId, `Please pay ${planData.cost} USDT:\n${tx.status_url}\nYour plan will activate automatically once payment is confirmed.`);
+      bot.sendMessage(chatId,
+        `✅ Payment created!\n\nPay **${planData.cost} USDT TRC20** using the link below:\n${tx.status_url}\n\nYour plan will activate automatically after payment confirmation.`
+      );
+
     } catch (err) {
-      console.error(err);
-      bot.sendMessage(chatId, "Error creating payment.");
+      console.error("CoinPayments createTransaction error:", err);
+      bot.sendMessage(chatId, `❌ Error creating payment: ${err.message}`);
     }
   }
 });
