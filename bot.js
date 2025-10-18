@@ -22,10 +22,10 @@ let users = {};
 
 // Mining Plans
 const plans = {
-  Standard: { cost: 10, speed: 2 },
-  Elite: { cost: 25, speed: 5 },
-  Supreme: { cost: 50, speed: 10 },
-  Legend: { cost: 250, speed: 25 }
+  Standard: { cost: 0.01, speed: 2 }, // cost in ETH (or BTC equivalent)
+  Elite: { cost: 0.025, speed: 5 },
+  Supreme: { cost: 0.05, speed: 10 },
+  Legend: { cost: 0.25, speed: 25 }
 };
 
 // --- Helper: Main Menu ---
@@ -56,15 +56,19 @@ bot.on('callback_query', async (callbackQuery) => {
 
   if (!users[userId]) users[userId] = { balance: 0, plan: null, miningSpeed: 0, lastCollected: null };
 
+  // --- Main Menu ---
   switch (data) {
-
     case "buy_plan":
-      let text = "Select a mining plan:";
       let buttons = [];
       for (let key in plans) {
-        buttons.push([{ text: `${key} (${plans[key].cost} USDT)`, callback_data: `plan_${key}` }]);
+        buttons.push([
+          { text: `${key} (${plans[key].cost} ETH)`, callback_data: `plan_${key}_ETH` },
+          { text: `${key} (${(plans[key].cost / 20).toFixed(5)} BTC)`, callback_data: `plan_${key}_BTC` } // example conversion
+        ]);
       }
-      bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: buttons } });
+      bot.sendMessage(chatId, "Select a mining plan and payment method:", {
+        reply_markup: { inline_keyboard: buttons }
+      });
       break;
 
     case "mine":
@@ -88,28 +92,29 @@ bot.on('callback_query', async (callbackQuery) => {
       break;
 
     case "withdraw":
-      bot.sendMessage(chatId, "Please enter your TRC20 wallet address for withdrawal.\nFormat: `/sendwallet YOUR_TRX_ADDRESS`");
+      bot.sendMessage(chatId, "Please enter your wallet address for withdrawal.\nFormat: `/sendwallet YOUR_ADDRESS CURRENCY`\nExample: `/sendwallet 0xABCDEF ETH`");
       break;
   }
 
-  // --- Handle Plan Purchase (TRC20) ---
+  // --- Handle Plan Purchase ---
   if (data.startsWith("plan_")) {
-    const planName = data.split("_")[1];
+    const parts = data.split("_");
+    const planName = parts[1];
+    const currency = parts[2] || "ETH";
     const planData = plans[planName];
 
     try {
       const tx = await client.createTransaction({
-        currency1: 'USDT',                  // user pays
-        currency2: 'USDT',                  // you receive
+        currency1: currency,
+        currency2: currency,
         amount: planData.cost,
         buyer_email: `${callbackQuery.from.username || callbackQuery.from.first_name}@example.com`,
-        custom: JSON.stringify({ userId, plan: planName }),
-        ipn_url: 'https://YOUR_DOMAIN/ipn', // must be public
-        currency2_network: 'TRC20'          // force TRC20
+        custom: JSON.stringify({ userId, plan: planName, currency }),
+        ipn_url: 'https://YOUR_DOMAIN/ipn'
       });
 
       bot.sendMessage(chatId,
-        `✅ Payment created!\n\nPay **${planData.cost} USDT TRC20** using the link below:\n${tx.status_url}\n\nYour plan will activate automatically after payment confirmation.`
+        `✅ Payment created!\n\nPay **${planData.cost} ${currency}** using the link below:\n${tx.status_url}\n\nYour plan will activate automatically after payment confirmation.`
       );
 
     } catch (err) {
@@ -120,7 +125,7 @@ bot.on('callback_query', async (callbackQuery) => {
 });
 
 // --- Handle Withdrawal Input ---
-bot.onText(/\/sendwallet (.+)/, async (msg, match) => {
+bot.onText(/\/sendwallet (.+) (ETH|BTC)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const user = users[userId];
@@ -128,22 +133,23 @@ bot.onText(/\/sendwallet (.+)/, async (msg, match) => {
   if (!user || user.balance <= 0) return bot.sendMessage(chatId, "You have no coins to withdraw.");
 
   const address = match[1];
+  const currency = match[2];
   const amount = user.balance;
   const fee = parseFloat(process.env.WITHDRAW_FEE || 0);
   const sendAmount = amount - fee;
 
-  if (sendAmount <= 0) return bot.sendMessage(chatId, `Your balance is too low for withdrawal (minimum fee ${fee} USDT).`);
+  if (sendAmount <= 0) return bot.sendMessage(chatId, `Your balance is too low for withdrawal (minimum fee ${fee} ${currency}).`);
 
   try {
     const tx = await client.createWithdrawal({
-      currency: 'USDT',
+      currency: currency,
       amount: sendAmount,
       address: address,
       auto_confirm: 1
     });
 
     user.balance = 0;
-    bot.sendMessage(chatId, `Withdrawal successful!\nAmount: ${sendAmount} USDT\nTx ID: ${tx.id}`);
+    bot.sendMessage(chatId, `Withdrawal successful!\nAmount: ${sendAmount} ${currency}\nTx ID: ${tx.id}`);
   } catch (err) {
     console.error(err);
     bot.sendMessage(chatId, `Withdrawal failed: ${err.message}`);
@@ -158,7 +164,7 @@ app.post('/ipn', (req, res) => {
   if (status >= 100) {
     try {
       const customData = JSON.parse(req.body.custom);
-      const { userId, plan } = customData;
+      const { userId, plan, currency } = customData;
       const planData = plans[plan];
 
       if (!users[userId]) users[userId] = { balance: 0 };
@@ -166,7 +172,7 @@ app.post('/ipn', (req, res) => {
       users[userId].miningSpeed = planData.speed;
       users[userId].lastCollected = null;
 
-      bot.sendMessage(userId, `Your plan "${plan}" is now active! Start mining using the menu.`);
+      bot.sendMessage(userId, `Your plan "${plan}" (${currency}) is now active! Start mining using the menu.`);
     } catch (err) {
       console.error("IPN parse error:", err);
     }
