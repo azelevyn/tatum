@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const CoinPayments = require('coinpayments');
 const express = require('express');
 const bodyParser = require('body-parser');
+const QRCode = require('qrcode');
 require('dotenv').config();
 
 // Telegram Bot
@@ -22,7 +23,7 @@ let users = {};
 
 // Mining Plans
 const plans = {
-  Standard: { cost: 0.01, speed: 2 }, // cost in ETH (or BTC equivalent)
+  Standard: { cost: 0.01, speed: 2 }, // ETH cost
   Elite: { cost: 0.025, speed: 5 },
   Supreme: { cost: 0.05, speed: 10 },
   Legend: { cost: 0.25, speed: 25 }
@@ -54,20 +55,19 @@ bot.on('callback_query', async (callbackQuery) => {
   const userId = callbackQuery.from.id;
   const data = callbackQuery.data;
 
-  if (!users[userId]) users[userId] = { balance: 0, plan: null, miningSpeed: 0, lastCollected: null };
+  if (!users[userId]) users[userId] = { balance: 0, plan: null, miningSpeed: 0, lastCollected: null, temp: {} };
 
   // --- Main Menu ---
   switch (data) {
     case "buy_plan":
-      let buttons = [];
-      for (let key in plans) {
-        buttons.push([
-          { text: `${key} (${plans[key].cost} ETH)`, callback_data: `plan_${key}_ETH` },
-          { text: `${key} (${(plans[key].cost / 20).toFixed(5)} BTC)`, callback_data: `plan_${key}_BTC` } // example conversion
-        ]);
-      }
-      bot.sendMessage(chatId, "Select a mining plan and payment method:", {
-        reply_markup: { inline_keyboard: buttons }
+      // Ask user to choose crypto
+      bot.sendMessage(chatId, "Select the cryptocurrency you want to pay with:", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "ETH", callback_data: "choose_crypto_ETH" }],
+            [{ text: "BTC", callback_data: "choose_crypto_BTC" }]
+          ]
+        }
       });
       break;
 
@@ -96,29 +96,51 @@ bot.on('callback_query', async (callbackQuery) => {
       break;
   }
 
+  // --- Handle Crypto Selection ---
+  if (data.startsWith("choose_crypto_")) {
+    const currency = data.split("_")[2];
+    users[userId].temp.currency = currency;
+
+    // Show plans with selected currency
+    let buttons = [];
+    for (let key in plans) {
+      const cost = currency === "ETH" ? plans[key].cost : (plans[key].cost / 20).toFixed(5); // ETH->BTC simple conversion
+      buttons.push([{ text: `${key} (${cost} ${currency})`, callback_data: `plan_${key}` }]);
+    }
+    bot.sendMessage(chatId, `Selected crypto: ${currency}\nChoose a mining plan:`, {
+      reply_markup: { inline_keyboard: buttons }
+    });
+  }
+
   // --- Handle Plan Purchase ---
   if (data.startsWith("plan_")) {
-    const parts = data.split("_");
-    const planName = parts[1];
-    const currency = parts[2] || "ETH";
+    const planName = data.split("_")[1];
+    const currency = users[userId].temp.currency || "ETH";
     const planData = plans[planName];
 
     try {
       const tx = await client.createTransaction({
         currency1: currency,
         currency2: currency,
-        amount: planData.cost,
+        amount: currency === "ETH" ? planData.cost : (planData.cost / 20),
         buyer_email: `${callbackQuery.from.username || callbackQuery.from.first_name}@example.com`,
         custom: JSON.stringify({ userId, plan: planName, currency }),
         ipn_url: 'https://YOUR_DOMAIN/ipn'
       });
 
-      bot.sendMessage(chatId,
-        `✅ Payment created!\n\nPay **${planData.cost} ${currency}** using the link below:\n${tx.status_url}\n\nYour plan will activate automatically after payment confirmation.`
-      );
+      const address = tx.address; // deposit address
+      const qr = await QRCode.toDataURL(address); // generate QR code
+
+      bot.sendPhoto(chatId, qr, {
+        caption: `✅ Payment created!\n\nSend **${currency === "ETH" ? planData.cost : (planData.cost / 20)} ${currency}** to this address:\n\`${address}\`\n\nYour plan will activate automatically after payment confirmation.`,
+        parse_mode: 'Markdown'
+      });
+
+      // Clear temporary selection
+      users[userId].temp.currency = null;
 
     } catch (err) {
-      console.error("CoinPayments createTransaction error:", err);
+      console.error(err);
       bot.sendMessage(chatId, `❌ Error creating payment: ${err.message}`);
     }
   }
