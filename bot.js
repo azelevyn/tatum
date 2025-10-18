@@ -105,7 +105,7 @@ bot.on('callback_query', async (callbackQuery) => {
         buyer_email: `${callbackQuery.from.username || callbackQuery.from.first_name}@example.com`,
         custom: JSON.stringify({ userId, plan: planName }),
         ipn_url: 'https://YOUR_DOMAIN/ipn', // must be public
-        currency2_network: 'TRC.20'          // force TRC20
+        currency2_network: 'TRC20'          // force TRC20
       });
 
       bot.sendMessage(chatId,
